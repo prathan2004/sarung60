@@ -1,5 +1,5 @@
 import {el,heading,metrics,metric,panel,details,badge,progressPanel,link,actions,field,form,submit,button,
- notice,message,call,money,percent,paymentTable,password,checkbox,table,modal,openSlip,dateTime,param} from './ui.js';
+ notice,message,call,money,percent,paymentTable,newPasswordField,checkbox,table,modal,openSlip,dateTime,param} from './ui.js';
 import {passwordPanel} from './member.js';
 
 const input = (name,type='text',attrs={}) => el('input',{name,type,...attrs});
@@ -32,7 +32,7 @@ export async function members() {
       try { await refresh(); } catch (error) { message(status,error.message,true); }
     },editName(row?.name),field('ชื่อผู้ใช้',input('username','text',{value:row?.username,required:true,
       minlength:3,maxlength:40,pattern:'[a-zA-Z0-9_.\\-]{3,40}',autocomplete:'off'})),
-    !row && field('รหัสผ่านเริ่มต้น',password(),'อย่างน้อย 12 ตัวอักษร'),
+    !row && newPasswordField('รหัสผ่านเริ่มต้น',4),
     checkbox('เปิดใช้งานบัญชี','active',row?.active ?? true),actions(submit('บันทึก'))));
   }
   function reset(row) {
@@ -41,7 +41,7 @@ export async function members() {
       await call('memberReset',{...values,id:row.id});
       view.dialog.close();
       message(status,'รีเซ็ตรหัสผ่านและสิ้นสุดเซสชันเดิมแล้ว');
-    },field('รหัสผ่านใหม่',password(),'อย่างน้อย 12 ตัวอักษร'),actions(submit('รีเซ็ตรหัสผ่าน'))));
+    },newPasswordField('รหัสผ่านใหม่',4),actions(submit('รีเซ็ตรหัสผ่าน'))));
   }
   async function history(row) {
     const view = modal('ประวัติการชำระเงิน · '+row.name);
@@ -221,5 +221,5 @@ export async function settings() {
   },field('ชื่อโครงการ',input('projectName','text',{value:data.PROJECT_NAME,maxlength:100,required:true})),
   actions(submit('บันทึกการตั้งค่า')))),panel('กติกาการออม',details([
     ['เป้าหมายพื้นฐาน',money(data.BASE_GOAL)],['ยอดเพิ่มต่อผู้ติดตาม',money(data.FOLLOWER_GOAL)],
-    ['เกณฑ์อายุขั้นต่ำ',data.FOLLOWER_MIN_AGE+' ปี'],['เขตเวลา',data.TIMEZONE]])),passwordPanel()];
+    ['เกณฑ์อายุขั้นต่ำ',data.FOLLOWER_MIN_AGE+' ปี'],['เขตเวลา',data.TIMEZONE]])),passwordPanel(12)];
 }

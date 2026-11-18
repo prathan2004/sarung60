@@ -35,11 +35,13 @@ async function protectedFields(action,input,pepper,ip) {
   const fields = action === 'password' ? ['currentPassword','password'] :
     action === 'memberSave' && data.id ? [] : ['password'];
   for (const field of fields) {
-    const minimum = field === 'currentPassword' || action === 'login' ? 1 : 12;
+    const minimum = field === 'currentPassword' || action === 'login' ? 1 : 4;
     const value = data[field];
-    if (typeof value !== 'string' || [...value].length < minimum || Buffer.byteLength(value) > 256) {
-      throw inputError(minimum === 1 ? 'รหัสผ่านไม่ถูกต้อง' : 'รหัสผ่านใหม่ต้องมีอย่างน้อย 12 ตัวอักษร และไม่เกิน 256 ไบต์');
+    const length = typeof value === 'string' ? [...value].length : 0;
+    if (length < minimum || Buffer.byteLength(value) > 256) {
+      throw inputError(minimum === 1 ? 'รหัสผ่านไม่ถูกต้อง' : 'รหัสผ่านใหม่ต้องมีอย่างน้อย 4 ตัวอักษร และไม่เกิน 256 ไบต์');
     }
+    if (action === 'password' && field === 'password') data.passwordLength = length;
   }
   for (const field of fields) data[field] = await hashPassword(data[field],pepper);
   return data;

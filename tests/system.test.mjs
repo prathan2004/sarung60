@@ -260,8 +260,9 @@ test('session logout, expiry, password changes, reset, deactivation, duplicate u
   const second = env.signIn('alice');
   env.client(token)('logout');
   assert.equal(env.request('history',{},token).status,401);
-  assert.equal(env.request('password',{currentPassword:altHash,password:altHash},second).status,403);
-  env.client(second)('password',{currentPassword:testedHash,password:altHash});
+  assert.equal(env.request('password',{currentPassword:altHash,password:altHash,passwordLength:altPassword.length},
+    second).status,403);
+  env.client(second)('password',{currentPassword:testedHash,password:altHash,passwordLength:altPassword.length});
   assert.equal(env.request('history',{},second).status,401);
   assert.equal(env.request('login',{username:'alice',password:testedHash,portal:'member',clientKey:'same'}).status,401);
   const updated = env.signIn('alice','member',altHash);
@@ -351,6 +352,26 @@ test('Netlify proxy forwards signed-session cookie securely, rejects cross-origi
   const logout = await invoke('logout',{},cookie);
   assert.match(logout.headers.get('set-cookie'),/Max-Age=0/);
   assert.equal((await invoke('dashboard',{},cookie)).status,401);
+
+  const adminCookie = '__Secure-saving_session='+env.adminToken;
+  const newMember = {username:'shortpass',name:'Short Password',active:true};
+  assert.equal((await invoke('memberSave',{...newMember,password:'abc'},adminCookie)).status,400);
+  const created = await invoke('memberSave',{...newMember,password:'abcd'},adminCookie);
+  assert.equal(created.status,200);
+  const {id} = await created.json();
+  const shortLogin = await invoke('login',{username:newMember.username,password:'abcd'});
+  assert.equal(shortLogin.status,200);
+  const memberCookie = shortLogin.headers.get('set-cookie').split(';')[0];
+  assert.equal((await invoke('password',{currentPassword:'abcd',password:'efg'},memberCookie)).status,400);
+  assert.equal((await invoke('password',{currentPassword:'abcd',password:'efgh'},memberCookie)).status,200);
+  assert.equal((await invoke('login',{username:newMember.username,password:'efgh'})).status,200);
+  assert.equal((await invoke('memberReset',{id,password:'ijk'},adminCookie)).status,400);
+  assert.equal((await invoke('memberReset',{id,password:'ijkl'},adminCookie)).status,200);
+  assert.equal((await invoke('login',{username:newMember.username,password:'ijkl'})).status,200);
+  assert.equal((await invoke('password',{currentPassword:password,password:'abcd',passwordLength:12,
+    role:'member'},adminCookie)).status,400);
+  assert.equal((await invoke('password',{currentPassword:password,password:'123456789012'},adminCookie)).status,200);
+
   badRedirect = true;
   assert.equal((await invoke('session',{},cookie)).status,502);
 });

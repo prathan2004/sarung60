@@ -1,5 +1,5 @@
 import {el,heading,metrics,metric,panel,details,badge,progressPanel,link,actions,field,form,submit,
- notice,message,call,money,paymentTable,password,loginUrl} from './ui.js';
+ notice,message,call,money,paymentTable,password,newPasswordField,loginUrl} from './ui.js';
 
 const MAX = 5*1024*1024;
 const CHUNK = 2*1024*1024;
@@ -93,15 +93,15 @@ export async function history() {
   return [heading('ประวัติการชำระเงิน',null,link('แจ้งชำระเงิน','/payment.html','primary')),
     panel(null,paymentTable(await call('history')))];
 }
-export function passwordPanel() {
+export function passwordPanel(minimum) {
   const status = notice();
   return panel('เปลี่ยนรหัสผ่าน',status,form(status,async values => {
     await call('password',values);
     location.replace(loginUrl+'?changed=1');
   },field('รหัสผ่านปัจจุบัน',password('currentPassword',false)),
-  field('รหัสผ่านใหม่',password(),'อย่างน้อย 12 ตัวอักษร'),actions(submit('บันทึกรหัสผ่านใหม่'))));
+  newPasswordField('รหัสผ่านใหม่',minimum),actions(submit('บันทึกรหัสผ่านใหม่'))));
 }
 export function profile(session) {
   return [heading('บัญชีของฉัน'),panel('ข้อมูลบัญชี',details([['ชื่อ',session.name],
-    ['รหัสสมาชิก',session.id],['ชื่อผู้ใช้',session.username]])),passwordPanel()];
+    ['รหัสสมาชิก',session.id],['ชื่อผู้ใช้',session.username]])),passwordPanel(4)];
 }

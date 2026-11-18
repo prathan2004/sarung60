@@ -52,6 +52,9 @@ function revoke(id) {
 }
 function changePassword(actor,data) {
   const r = actor.row;
+  const minimum = actor.role === 'admin' ? 12 : 4;
+  check(Number.isInteger(data.passwordLength) && data.passwordLength >= minimum,
+    'รหัสผ่านใหม่ต้องมีอย่างน้อย ' + minimum + ' ตัวอักษร');
   check(matches(data.currentPassword,r.PasswordHash), 'รหัสผ่านปัจจุบันไม่ถูกต้อง',403);
   const hash = seal(data.password);
   const update = actor.role === 'admin'

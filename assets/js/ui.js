@@ -22,8 +22,10 @@ export const submit = label => el('button',{type:'submit',class:'btn primary'},l
 export const actions = (...nodes) => el('div',{class:'actions'},...nodes);
 export const field = (label,node,help) => el('label',{},label,node,help && el('small',{},help));
 export const checkbox = (label,name,checked=false) => el('label',{class:'check'},el('input',{type:'checkbox',name,checked}),label);
-export const password = (name='password',fresh=true) => el('input',{name,type:'password',required:true,
-  minlength:fresh ? 12 : undefined,maxlength:256,autocomplete:fresh ? 'new-password' : 'current-password'});
+export const password = (name='password',fresh=true,minimum=12) => el('input',{name,type:'password',required:true,
+  minlength:fresh ? minimum : undefined,maxlength:256,autocomplete:fresh ? 'new-password' : 'current-password'});
+export const newPasswordField = (label,minimum) =>
+  field(label,password('password',true,minimum),'อย่างน้อย '+minimum+' ตัวอักษร');
 export const panel = (title,...body) => el('section',{class:'panel'},title && el('h2',{},title),...body);
 export const heading = (title,sub,...buttons) => el('header',{class:'heading'},
   el('div',{},el('h1',{},title),sub && el('p',{},sub)),buttons.length ? actions(...buttons) : null);
