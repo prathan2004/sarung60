@@ -112,3 +112,17 @@ function reviewPayment(actor,data) {
   audit(actor,'PAYMENT_'+data.status.toUpperCase(),row.MemberID,row.PaymentID,reason)]);
   return publicPayment({...row,Status:data.status,AdminID:actor.id,ReviewedAt:reviewedAt,RejectReason:reason});
 }
+function reopenPayment(actor,data) {
+  const row = paymentById(data.id);
+  check(['Approved','Rejected'].includes(row.Status) &&
+    row.Status === data.status && row.ReviewedAt === data.reviewedAt,
+    'ผลตรวจสอบเปลี่ยนแล้ว กรุณาเปิดรายการอีกครั้ง',409);
+  const reason = clean(data.reason,500);
+  const previous = {
+    status:row.Status,adminId:row.AdminID,reviewedAt:row.ReviewedAt,rejectReason:row.RejectReason
+  };
+  commit([put('Payments',[row.PaymentID,row.MemberID,row.CreatedAt,row.Amount,row.SlipFileID,
+    'Pending','','',''],row._index),
+    audit(actor,'PAYMENT_REOPENED',row.MemberID,row.PaymentID,JSON.stringify({reason,previous}))]);
+  return publicPayment({...row,Status:'Pending',AdminID:'',ReviewedAt:'',RejectReason:''});
+}

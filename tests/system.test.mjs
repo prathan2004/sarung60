@@ -34,18 +34,22 @@ function simulate() {
   const blob = (values,mime,name) => ({
     name,getBytes:() => Array.from(values),getContentType:() => mime
   });
-  function makeFolder(name) {
+  function makeFolder(name,parent) {
     const id = randomUUID();
     const children = [];
     const contents = [];
     const result = {
       name,getId:() => id,setSharing(access) { this.access = access; },
+      getParents:() => iterator(parent ? [parent] : []),
+      setName(value) { this.name = value; },
+      isTrashed() { return this.trashed === true; },
+      setTrashed(value) { this.trashed = value; },
       createFolder(child) {
-        const created = makeFolder(child);
+        const created = makeFolder(child,this);
         children.push(created);
         return created;
       },
-      getFoldersByName:child => iterator(children.filter(folder => folder.name === child)),
+      getFoldersByName:child => iterator(children.filter(folder => !folder.isTrashed() && folder.name === child)),
       createFile(data) {
         const fileId = randomUUID();
         const file = {id:fileId,name:data.name,trashed:false,getId:() => fileId,getBlob:() => data,
@@ -102,6 +106,14 @@ function simulate() {
         const sheet = [...sheets.values()].find(item => item.id === id);
         if (request.deleteDimension) {
           sheet.entries.splice(update.range.startIndex,update.range.endIndex-update.range.startIndex);
+          continue;
+        }
+        if (request.updateCells?.range) {
+          const {startRowIndex,endRowIndex} = update.range;
+          for (let i=startRowIndex;i<endRowIndex;i++) {
+            sheet.entries[i] = update.rows[i-startRowIndex]?.values.map(cell =>
+              Object.values(cell.userEnteredValue)[0]) || [];
+          }
           continue;
         }
         const values = update.rows[0].values.map(cell => Object.values(cell.userEnteredValue)[0]);
@@ -230,6 +242,46 @@ test('pending, review, rejection, cumulative approved amount and surplus',() => 
   for (const id of [paymentId,rejectId,top]) assert.equal(member('slip',{id,part:0}).bytes,png.toString('base64'));
 });
 
+test('Admin can reopen approved or rejected payments while preserving their slips and audit history',() => {
+  const env = simulate();
+  const memberId = env.createMember('alice');
+  const token = env.signIn('alice');
+  const member = env.client(token);
+  const id = env.stage(member,png);
+  member('submit',{id,size:png.length,mime:'image/png',amount:500});
+  const approved = env.admin('review',{id,status:'Approved',bankVerified:true});
+  const reopen = {id,status:approved.status,reviewedAt:approved.reviewedAt,reason:'Wrong review'};
+  assert.equal(env.request('paymentReopen',reopen,token).status,403);
+  assert.equal(env.request('reviewed',{},token).status,403);
+  assert.equal(env.request('paymentReopen',{...reopen,reason:' '},env.adminToken).status,400);
+  assert.equal(env.admin('reviewed')[0].id,id);
+  assert.equal(env.admin('paymentReopen',reopen).status,'Pending');
+  assert.equal(env.request('paymentReopen',reopen,env.adminToken).status,409);
+  assert.equal(env.admin('reviewed').length,0);
+  assert.equal(env.admin('pending')[0].id,id);
+  const summary = member('dashboard');
+  assert.equal(summary.approved,0);
+  assert.equal(summary.pending,500);
+  assert.equal(summary.remaining,2000);
+  assert.equal(member('slip',{id,part:0}).bytes,png.toString('base64'));
+  assert.equal(member('history').length,1);
+  assert.equal(member('history')[0].reviewedAt,'');
+  const audit = env.admin('logs').items.find(row => row.Action === 'PAYMENT_REOPENED');
+  assert.equal(audit.MemberID,memberId);
+  assert.deepEqual(JSON.parse(audit.Detail),{reason:reopen.reason,previous:{
+    status:'Approved',adminId:approved.adminId,reviewedAt:approved.reviewedAt,rejectReason:''
+  }});
+  env.advance(1000);
+  const approvedAgain = env.admin('review',{id,status:'Approved',bankVerified:true});
+  assert.equal(env.request('paymentReopen',reopen,env.adminToken).status,409);
+  env.admin('paymentReopen',{...reopen,reviewedAt:approvedAgain.reviewedAt});
+  const rejected = env.admin('review',{id,status:'Rejected',reason:'Bank mismatch'});
+  assert.equal(env.admin('paymentReopen',{...reopen,status:rejected.status,reviewedAt:rejected.reviewedAt}).status,'Pending');
+  assert.equal(member('history')[0].reason,'');
+  const lastAudit = env.admin('logs').items.find(row => row.Action === 'PAYMENT_REOPENED');
+  assert.equal(JSON.parse(lastAudit.Detail).previous.rejectReason,'Bank mismatch');
+});
+
 test('cross-member access and forged roles are rejected, Admin can read private slip',() => {
   const env = simulate();
   const id = env.createMember('alice');
@@ -310,6 +362,50 @@ test('upload validation, 5 MiB chunk transfer, idempotent retries and Sheets wri
   env.advance(86400001);
   env.evaluate('purgeExpired()');
   assert.equal([...env.files.values()].filter(file => !file.trashed).length,1);
+});
+
+test('Admin reset clears project data and Drive storage, preserves accounts and can resume after failure',() => {
+  const env = simulate();
+  const id = env.createMember('alice');
+  const token = env.signIn('alice');
+  const member = env.client(token);
+  env.admin('settingsSave',{projectName:'Changed name'});
+  env.admin('followerSave',{memberId:id,name:'Follower',birth:'2000-11-19'});
+  const payment = env.stage(member,png);
+  member('submit',{id:payment,size:png.length,mime:'image/png',amount:500});
+  env.stage(member,png);
+  assert.equal(env.request('systemReset',{confirmation:'RESET'},token).status,403);
+  assert.equal(env.request('systemReset',{confirmation:'reset'},env.adminToken).status,400);
+  assert.equal(member('history').length,1);
+  const originalFolder = env.scripts.get('SLIPS_ID');
+  const membersBefore = structuredClone(env.sheets.get('Members').entries);
+  const adminsBefore = structuredClone(env.sheets.get('Admins').entries);
+  env.failNextBatch();
+  assert.equal(env.request('systemReset',{confirmation:'RESET'},env.adminToken).status,503);
+  assert.equal(env.admin('settings').resetInProgress,true);
+  assert.equal(env.request('history',{},token).status,503);
+  assert.equal(env.request('settingsSave',{projectName:'New name'},env.adminToken).status,503);
+  assert.equal(env.folders.get(originalFolder).isTrashed(),true);
+  const replacement = env.scripts.get('SLIPS_ID');
+  assert.notEqual(replacement,originalFolder);
+  env.admin('systemReset',{confirmation:'RESET'});
+  assert.equal(env.scripts.get('SLIPS_ID'),replacement);
+  assert.equal(env.folders.get(replacement).name,'PaymentSlips');
+  assert.equal(env.scripts.has('RESET_SLIPS_ID'),false);
+  for (const name of ['Followers','Payments','Uploads','Sessions']) {
+    assert.equal(env.sheets.get(name).getLastRow(),1);
+  }
+  assert.equal(env.sheets.get('AuditLogs').getLastRow(),2);
+  assert.equal(env.sheets.get('AuditLogs').entries[1][3],'SYSTEM_RESET');
+  assert.deepEqual(env.sheets.get('Members').entries,membersBefore);
+  assert.deepEqual(env.sheets.get('Admins').entries,adminsBefore);
+  assert.equal(env.request('dashboard',{},token).status,401);
+  assert.equal(env.request('settings',{},env.adminToken).status,401);
+  const newAdmin = env.client(env.signIn('admin','admin'));
+  assert.equal(newAdmin('settings').PROJECT_NAME,'ระบบติดตามการออม');
+  const newMember = env.client(env.signIn('alice'));
+  assert.equal(newMember('dashboard').goal,2000);
+  assert.deepEqual(newMember('history'),[]);
 });
 
 test('Netlify proxy forwards signed-session cookie securely, rejects cross-origin and follows only Google redirect',async t => {

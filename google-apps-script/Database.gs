@@ -33,12 +33,34 @@ function commit(changes) {
   const book = database();
   const requests = changes.map(({name,values,index}) => {
     const sheetId = book.getSheetByName(name).getSheetId();
-    const data = {values:values.map(value => ({userEnteredValue:typeof value === 'number'
-      ? {numberValue:value} : typeof value === 'boolean' ? {boolValue:value} : {stringValue:String(value)}}))};
+    const data = sheetRow(values);
     return index === undefined
       ? {appendCells:{sheetId,rows:[data],fields:'userEnteredValue'}}
       : {updateCells:{start:{sheetId,rowIndex:index,columnIndex:0},rows:[data],fields:'userEnteredValue'}};
   });
+  Sheets.Spreadsheets.batchUpdate({requests},book.getId());
+}
+function sheetRow(values) {
+  return {values:values.map(value => ({userEnteredValue:typeof value === 'number'
+    ? {numberValue:value} : typeof value === 'boolean' ? {boolValue:value} : {stringValue:String(value)}}))};
+}
+function resetTables(actor) {
+  const book = database();
+  const replacements = {
+    Followers:[], Payments:[], Uploads:[], Sessions:[],
+    Settings:Object.entries(DEFAULTS), AuditLogs:[audit(actor,'SYSTEM_RESET').values]
+  };
+  const requests = [];
+  for (const [name,values] of Object.entries(replacements)) {
+    const sheet = book.getSheetByName(name);
+    const endRowIndex = Math.max(sheet.getLastRow(),1+values.length);
+    if (endRowIndex <= 1) continue;
+    requests.push({updateCells:{
+      range:{sheetId:sheet.getSheetId(),startRowIndex:1,endRowIndex,
+        startColumnIndex:0,endColumnIndex:SCHEMA[name].split(' ').length},
+      rows:values.map(sheetRow),fields:'userEnteredValue'
+    }});
+  }
   Sheets.Spreadsheets.batchUpdate({requests},book.getId());
 }
 function audit(actor, action, member = '', payment = '', detail = '') {

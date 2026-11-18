@@ -38,3 +38,22 @@ function updateSettings(actor,data) {
     audit(actor,'SETTINGS_UPDATED','','',JSON.stringify({previous:current && current.Value,name}))]);
   return {...config,PROJECT_NAME:name};
 }
+function resetSystem(actor,data) {
+  check(data.confirmation === 'RESET','พิมพ์ RESET เพื่อยืนยันการรีเซ็ต');
+  const properties = props();
+  let previousId = properties.getProperty('RESET_SLIPS_ID');
+  if (!previousId) {
+    previousId = properties.getProperty('SLIPS_ID');
+    check(previousId,'ยังไม่ได้ตั้งค่าโฟลเดอร์สลิป',503);
+    properties.setProperty('RESET_SLIPS_ID',previousId);
+  }
+  try {
+    resetSlipStorage(previousId);
+    resetTables(actor);
+    properties.deleteProperty('RESET_SLIPS_ID');
+  } catch (error) {
+    console.error('System reset incomplete: '+error.name);
+    check(false,'รีเซ็ตยังไม่เสร็จ กรุณากดยืนยันอีกครั้งเพื่อดำเนินการต่อ',503);
+  }
+  return {};
+}

@@ -86,7 +86,7 @@ export default async function handler(request,context) {
       return error(result.error || 'ทำรายการไม่สำเร็จ',status);
     }
     if (input.action === 'login') return json({role:result.data.role},200,cookie(result.data.token,28800));
-    return json(result.data,200,['logout','password'].includes(input.action) ? cookie('',0) : undefined);
+    return json(result.data,200,['logout','password','systemReset'].includes(input.action) ? cookie('',0) : undefined);
   } catch (failure) {
     return error(failure.status === 400 ? failure.message : 'ระบบเชื่อมต่อไม่ได้ กรุณาลองอีกครั้ง',
       failure.status === 400 ? 400 : 502);

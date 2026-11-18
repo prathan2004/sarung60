@@ -101,11 +101,15 @@ export async function followers() {
   return wrapper;
 }
 export async function payments() {
-  const records = await call('pending');
-  return [heading('ตรวจสอบการชำระเงิน',records.length+' รายการรอตรวจสอบ'),panel(null,
+  const reviewed = param('view') === 'reviewed';
+  const records = await call(reviewed?'reviewed':'pending');
+  return [heading('ตรวจสอบการชำระเงิน',records.length+(reviewed?' รายการตรวจสอบแล้ว':' รายการรอตรวจสอบ'),
+    link('รอตรวจสอบ','/admin/payments.html',reviewed?'':'primary'),
+    link('ตรวจสอบแล้ว','/admin/payments.html?view=reviewed',reviewed?'primary':'')),panel(null,
     table(['สมาชิก','รหัสรายการ','วันที่แจ้ง','จำนวนเงิน','สถานะ','จัดการ'],
     records.map(row => [row.memberName,row.id,dateTime(row.createdAt),money(row.amount),badge(row.status),
-      link('ตรวจสอบ','/admin/payment-detail.html?id='+encodeURIComponent(row.id))])))];
+      link(reviewed?'ดูรายละเอียด':'ตรวจสอบ','/admin/payment-detail.html?id='+
+        encodeURIComponent(row.id)+(reviewed?'&from=reviewed':''))])))];
 }
 export async function paymentDetail() {
   const id = param('id');
@@ -127,6 +131,21 @@ export async function paymentDetail() {
       field('เหตุผลที่ปฏิเสธ',el('textarea',{name:'reason',maxlength:500,required:true})),
     actions(submit(approved?'อนุมัติรายการ':'ยืนยันการปฏิเสธ'))));
   }
+  function reopen() {
+    const view = modal('ยืนยันการยกเลิกผลตรวจสอบ');
+    view.body.append(form(view.status,async values => {
+      const result = await call('paymentReopen',{id,status:row.status,reviewedAt:row.reviewedAt,reason:values.reason});
+      row = {...row,...result};
+      view.dialog.close();
+      draw();
+      message(status,'ยกเลิกผลตรวจสอบแล้ว รายการกลับไปรอตรวจสอบ');
+    },el('p',{},row.memberName+' · '+money(row.amount)),
+    el('p',{},row.status === 'Approved'
+      ? 'รายการจะกลับไปรอตรวจสอบ และยอดนี้จะถูกหักออกจากยอดอนุมัติ'
+      : 'รายการจะกลับไปรอตรวจสอบและสามารถตรวจใหม่ได้'),
+    field('เหตุผลที่ยกเลิกผลตรวจสอบ',el('textarea',{name:'reason',maxlength:500,required:true})),
+    actions(submit('ยืนยันยกเลิกผลตรวจสอบ'))));
+  }
   function draw() {
     body.replaceChildren(panel('ข้อมูลรายการ',details([['รหัสรายการ',row.id],['สมาชิก',row.memberName],
       ['รหัสสมาชิก',row.memberId],['จำนวนเงิน',money(row.amount)],['สถานะ',badge(row.status)],
@@ -134,10 +153,12 @@ export async function paymentDetail() {
       ['ผู้ตรวจสอบ',row.adminId || '—'],['หมายเหตุ',row.reason || '—']]),actions(
       button('ดูสลิป',() => openSlip(id)),
       row.status === 'Pending' && button('อนุมัติ',() => review(true),'primary'),
-      row.status === 'Pending' && button('ปฏิเสธ',() => review(false),'danger'))));
+      row.status === 'Pending' && button('ปฏิเสธ',() => review(false),'danger'),
+      ['Approved','Rejected'].includes(row.status) && button('ยกเลิกผลตรวจสอบ',reopen,'danger'))));
   }
   draw();
-  return [heading('รายละเอียดการชำระเงิน',null,link('กลับไปที่รายการ','/admin/payments.html')),status,body];
+  const back = '/admin/payments.html'+(param('from') === 'reviewed'?'?view=reviewed':'');
+  return [heading('รายละเอียดการชำระเงิน',null,link('กลับไปที่รายการ',back)),status,body];
 }
 const reportColumns = ['สมาชิก','ผู้ติดตามที่เข้าเงื่อนไข','เป้าหมาย (บาท)','อนุมัติแล้ว (บาท)',
   'รอตรวจสอบ (บาท)','คงเหลือ (บาท)','ความสำเร็จ (%)'];
@@ -214,6 +235,22 @@ export async function logs() {
 export async function settings() {
   const data = await call('settings');
   const status = notice();
+  function confirmReset() {
+    const view = modal('ยืนยันการรีเซ็ตระบบ');
+    view.body.append(form(view.status,async values => {
+      message(view.status,'กำลังรีเซ็ตระบบ…');
+      await call('systemReset',values);
+      location.replace('/admin/login.html?reset=1');
+    },el('p',{},'ผู้ติดตาม รายการชำระเงิน สลิป รายการอัปโหลดค้าง และประวัติการดำเนินงานเดิมจะถูกลบออกจากระบบ การตั้งค่าจะกลับเป็นค่าเริ่มต้น และทุกบัญชีต้องเข้าสู่ระบบใหม่'),
+    el('p',{},'บัญชีสมาชิกและบัญชีผู้ดูแลจะถูกเก็บไว้'),
+    field('พิมพ์ RESET เพื่อยืนยัน',input('confirmation','text',{required:true,pattern:'RESET',autocomplete:'off'})),
+    actions(el('button',{type:'submit',class:'btn danger'},'ยืนยันรีเซ็ตระบบ'))));
+  }
+  const resetPanel = panel('รีเซ็ตระบบ',el('p',{},data.resetInProgress
+    ? 'การรีเซ็ตยังไม่เสร็จ กรุณายืนยันเพื่อดำเนินการต่อ'
+    : 'ล้างข้อมูลโครงการและเก็บบัญชีสมาชิกกับบัญชีผู้ดูแลไว้'),
+    actions(button(data.resetInProgress?'ดำเนินการรีเซ็ตต่อ':'รีเซ็ตระบบ',confirmReset,'danger')));
+  if (data.resetInProgress) return [heading('ตั้งค่าระบบ'),resetPanel];
   return [heading('ตั้งค่าระบบ'),panel('ข้อมูลโครงการ',status,form(status,async values => {
     const updated = await call('settingsSave',values);
     document.querySelector('.brand-name').textContent = updated.PROJECT_NAME;
@@ -221,5 +258,5 @@ export async function settings() {
   },field('ชื่อโครงการ',input('projectName','text',{value:data.PROJECT_NAME,maxlength:100,required:true})),
   actions(submit('บันทึกการตั้งค่า')))),panel('กติกาการออม',details([
     ['เป้าหมายพื้นฐาน',money(data.BASE_GOAL)],['ยอดเพิ่มต่อผู้ติดตาม',money(data.FOLLOWER_GOAL)],
-    ['เกณฑ์อายุขั้นต่ำ',data.FOLLOWER_MIN_AGE+' ปี'],['เขตเวลา',data.TIMEZONE]])),passwordPanel(12)];
+    ['เกณฑ์อายุขั้นต่ำ',data.FOLLOWER_MIN_AGE+' ปี'],['เขตเวลา',data.TIMEZONE]])),passwordPanel(12),resetPanel];
 }

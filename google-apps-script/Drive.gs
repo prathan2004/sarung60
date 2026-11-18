@@ -24,10 +24,23 @@ function trash(fileId) {
 }
 function purgeExpired() {
   locked(() => {
+    if (props().getProperty('RESET_SLIPS_ID')) return;
     const cutoff = Date.now() - 86400000;
     const expired = rows('Uploads').filter(row => Date.parse(row.CreatedAt) <= cutoff && trash(row.FileID));
     const sessions = rows('Sessions').filter(row => row.ExpiresAt <= Date.now());
     commit([...expired.map(row => erase('Uploads',row._index)), ...sessions.map(row => erase('Sessions',row._index))]);
     compact(['Uploads','Sessions','Followers']);
   });
+}
+function resetSlipStorage(previousId) {
+  const properties = props();
+  const old = DriveApp.getFolderById(previousId);
+  if (properties.getProperty('SLIPS_ID') === previousId) {
+    const parents = old.getParents();
+    check(parents.hasNext(),'ไม่พบโฟลเดอร์หลักของระบบ',503);
+    const replacement = folder(parents.next(),'PaymentSlips-reset-'+previousId);
+    properties.setProperty('SLIPS_ID',replacement.getId());
+  }
+  slipRoot().setName('PaymentSlips');
+  if (!old.isTrashed()) old.setTrashed(true);
 }

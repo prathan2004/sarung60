@@ -15,8 +15,15 @@ function doPost(event) {
 }
 function route(body) {
   const data = body.data || {};
-  if (body.action === 'login') return login(data);
+  const resetting = !!props().getProperty('RESET_SLIPS_ID');
+  const resetMessage = 'ระบบกำลังรีเซ็ต กรุณาลองอีกครั้งภายหลัง';
+  if (body.action === 'login') {
+    check(!resetting || data.portal === 'admin',resetMessage,503);
+    return login(data);
+  }
   const actor = authenticate(body.token);
+  check(!resetting || (actor.role === 'admin' && ['session','settings','systemReset','logout'].includes(body.action)),
+    resetMessage,503);
   switch (body.action) {
     case 'session': return {role:actor.role,name:actor.row.Name || actor.row.Username,
       id:actor.id,username:actor.row.Username,projectName:settings().PROJECT_NAME};
@@ -49,9 +56,11 @@ function route(body) {
       }
       case 'followerSave': return changeFollower(actor,data,false);
       case 'followerDelete': return changeFollower(actor,data,true);
-      case 'pending': {
+      case 'pending':
+      case 'reviewed': {
+        const statuses = body.action === 'pending' ? ['Pending'] : ['Approved','Rejected'];
         const members = new Map(rows('Members').map(row => [row.MemberID,row.Name]));
-        return rows('Payments').filter(row => row.Status === 'Pending').reverse()
+        return rows('Payments').filter(row => statuses.includes(row.Status)).reverse()
           .map(row => ({...publicPayment(row),memberName:members.get(row.MemberID)}));
       }
       case 'paymentDetail': {
@@ -59,6 +68,7 @@ function route(body) {
         return {...publicPayment(row),memberName:memberById(row.MemberID).Name};
       }
       case 'review': return reviewPayment(actor,data);
+      case 'paymentReopen': return reopenPayment(actor,data);
       case 'logs': {
         const offset = Number.isSafeInteger(data.offset) ? Math.max(0,data.offset) : 0;
         const logs = rows('AuditLogs');
@@ -66,8 +76,9 @@ function route(body) {
           .map(({_index,...row}) => row);
         return {items,more:logs.length > offset+100};
       }
-      case 'settings': return settings();
+      case 'settings': return {...settings(),resetInProgress:resetting};
       case 'settingsSave': return updateSettings(actor,data);
+      case 'systemReset': return resetSystem(actor,data);
     }
   }
   check(false,'ไม่มีสิทธิ์ทำรายการ',403);
